@@ -126,14 +126,31 @@ def classify_work_type(naics, psc, desc):
     naics = (naics or "").strip()
     psc   = (psc or "").upper().strip()
     desc  = (desc or "").lower()
+
+    # Highest priority: delivery method keywords → New Construction
+    if any(kw in desc for kw in ["design-bid-build", "design-build", "design bid build", "design build"]):
+        return "New Construction"
+
+    # Renovation keywords in description
+    if any(kw in desc for kw in ["repair", "renovate", "renovation", "replace", "relocate"]):
+        return "Renovation & Repairs"
+
+    # NAICS 236220 = Commercial/Institutional Building Construction → New Construction
     if naics == "236220":
         return "New Construction"
+
+    # Maintenance keywords
     if any(kw in desc for kw in MAINTENANCE_KEYWORDS):
         return "Regular Maintenance"
+
+    # Broader renovation keywords
     if any(kw in desc for kw in RENOVATION_KEYWORDS):
         return "Renovation & Repairs"
+
+    # PSC suffix 'B' = Repair/Alteration
     if len(psc) >= 4 and psc[3] == "B":
         return "Renovation & Repairs"
+
     return "Renovation & Repairs"
 
 
@@ -189,7 +206,7 @@ def flatten(record):
     }
 
 
-def fetch_page(page):
+def fetch_page(page, retries=5):
     payload = {
         "filters": {
             "agencies": [
@@ -208,11 +225,22 @@ def fetch_page(page):
         "sort": "Action Date",
         "order": "desc",
     }
-    resp = requests.post(f"{API_BASE}/search/spending_by_transaction/", json=payload, timeout=60)
-    if not resp.ok:
-        print(f"  API error {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
-    return resp.json()
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.post(
+                f"{API_BASE}/search/spending_by_transaction/",
+                json=payload, timeout=60
+            )
+            if not resp.ok:
+                print(f"  API error {resp.status_code}: {resp.text}")
+                resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            if attempt == retries:
+                raise
+            wait = attempt * 5
+            print(f"  Connection error (attempt {attempt}/{retries}), retrying in {wait}s... ({e})")
+            time.sleep(wait)
 
 
 def main():
