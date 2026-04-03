@@ -1,0 +1,18 @@
+# Output data (can be large)
+*.csv
+*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
