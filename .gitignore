@@ -10,6 +10,13 @@ __pycache__/
 venv/
 .venv/
 
+# Secrets
+service-account-key.json
+*.json
+
+# Local tool config/state
+.claude/
+
 # Jupyter
 .ipynb_checkpoints/
 
