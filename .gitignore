@@ -17,6 +17,13 @@ service-account-key.json
 # Local tool config/state
 .claude/
 
+# Portable poppler binaries (pdftoppm), downloaded not vendored - see tools/README.md
+tools/poppler/
+
+# DD1391 inputs/working files and page-image fallback renders
+dd1391_inputs/
+dd1391_work/
+
 # Jupyter
 .ipynb_checkpoints/
 

@@ -13,13 +13,22 @@ import re
 _P_NUMBER_PATTERN = re.compile(r"\bP-?(\d{3,4})\b", re.IGNORECASE)
 
 # Checked in order - more specific labels (CDC, BEQ, Open Bay) before the
-# generic Barracks/Housing catch-alls.
+# generic Barracks/Housing catch-alls. Broad net on phrasing since award
+# descriptions and DD1391s don't use consistent wording (e.g. "bachelor"
+# vs "bachelors", BEQ vs BOQ vs UEPH all describe the same building type).
 _PROJECT_TYPE_PATTERNS = [
     ("CDC", re.compile(r"child development center|\bcdc\b", re.IGNORECASE)),
-    ("BEQ", re.compile(r"\bbeq\b|bachelor enlisted quarters", re.IGNORECASE)),
-    ("Open Bay", re.compile(r"open bay", re.IGNORECASE)),
+    ("BEQ", re.compile(
+        r"\bbeq\b|\bboq\b|\bueph\b|bachelors?\s+enlisted\s+quarters|"
+        r"bachelors?\s+officer.?\s+quarters|unaccompanied\s+enlisted\s+"
+        r"personnel\s+housing|unaccompanied\s+officer.?\s+quarters",
+        re.IGNORECASE)),
+    ("Open Bay", re.compile(r"open\s*bay", re.IGNORECASE)),
     ("Barracks", re.compile(r"barracks", re.IGNORECASE)),
-    ("Housing", re.compile(r"family housing|military housing|unaccompanied housing|\bhousing\b", re.IGNORECASE)),
+    ("Housing", re.compile(
+        r"family\s+housing|military\s+housing|unaccompanied\s+housing|"
+        r"enlisted\s+quarters|officer.?\s+quarters|\bhousing\b",
+        re.IGNORECASE)),
 ]
 
 

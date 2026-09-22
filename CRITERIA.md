@@ -143,6 +143,80 @@ structure, and is never imported by the daily pipeline
 (`project_run.py` → `historical_run.py` + `new_opp_run.py`). Running the
 pipeline daily can never accidentally change a table's schema.
 
+## DD1391 MILCON ingestion + award-matching pipeline
+
+A separate, newer system layered on top of the above (different tables,
+same BigQuery dataset/credentials). Architecture principle: **cached
+awards, no live API calls during normal use** - only `awards_sync.py` is
+allowed to call USASpending live.
+
+### `awards` table (`awards_sync.py`)
+
+Run monthly by hand (or later via Cloud Scheduler + Cloud Function).
+Scope: DoD awarding agency, PSC Y-series **or** NAICS 236220 (two
+separate queries merged/deduped - USASpending only ANDs filters within
+one request), client-side filtered to Housing/Barracks/BEQ/CDC/Open Bay
+descriptions via `project_classifier.classify_project_type` (reused as-is
+from the existing pipeline). One row per `award_id`; USASpending's
+`spending_by_award` endpoint already reports each award's current total
+obligated value, so no separate funding-action summing is needed beyond a
+safety-net dedupe across the two source queries.
+
+**Known gaps:**
+- `uic` is always NULL from the sync (USASpending has no native DoD UIC
+  field) - `award_matcher.py` falls back to matching on
+  `pop_city`/`pop_state`, and `uic_crosswalk` is filled in incrementally
+  as UICs are confirmed during manual review.
+- `parent_idiq_piid` (from "Parent Award ID") is null for most awards in
+  this endpoint; no per-award detail-endpoint lookup is made (would be one
+  API call per award, defeating the point of a cheap batch sync).
+
+### `dd1391_project_overview` / `dd1391_cost_rows` (`dd1391_parser.py`)
+
+Phase 1, terminal-only. pypdf text extraction per page; pages that come
+back scrambled (custom font encodings some DD1391s use) are rendered to
+PNG via the portable Poppler build in `tools/poppler/` (see
+`tools/fetch_poppler.py`) and read by Claude Haiku as images instead -
+logged in `import_notes`. One Haiku tool-call per detected project
+extracts every Table 1 field plus the Table 2 cost-row table together
+(mixing clean-page text and garbled-page images in the same call to avoid
+a second round-trip). Multi-project "books" are split by detecting
+repeated "MILITARY CONSTRUCTION PROGRAM" + project-number header pages;
+this heuristic is unverified against real samples and should be the first
+thing tuned once Phase 3 test PDFs are available.
+
+Duplicate `project_id`s already in BigQuery are skipped on insert, never
+overwritten - see `dd1391_parser.py::load_results`.
+
+### `award_candidates` (`award_matcher.py`)
+
+Phase 2. Reads only the cached `awards` table (one $0 BigQuery read per
+service branch per matcher run, everything else is pandas in memory).
+Hard filter (UIC-or-location + service branch + typology + award_date in
+`[prep_date, prep_date+36mo]` + cost within ±40%) is free; ranking only
+calls Claude when the hard filter returns 2-10 candidates (Haiku first,
+escalating to Sonnet only if Haiku's top confidence is below 70). Zero
+candidates triggers exactly one Anthropic-hosted web search
+(`claude_client.web_search_once`) checking for a Defense Innovation Unit
+OTA award or "not constructed"/cancelled language - never looped or
+retried automatically.
+
+### `uic_crosswalk`
+
+Populated incrementally as UICs are confirmed during manual review - no
+downloadable DoD UIC master list exists (DoDAAD requires restricted
+access), so this is never pre-loaded.
+
+### Model routing / cost controls
+
+All Claude calls default to `CLAUDE_HAIKU_MODEL` (see `config.py`); the
+only escalation path is Phase 2 ranking to Sonnet on low Haiku confidence,
+and the single Phase 2 web search (which needs Sonnet for the hosted
+`web_search_20250305` tool). `claude_client.CostTracker` prints a running
+`$` estimate to the terminal after every call and raises before exceeding
+a `--budget` flag (default $6) passed to `dd1391_parser.py` /
+`award_matcher.py`.
+
 ## Change log
 
 - Added PSC family filter (Y/Z/C) to `project_preaward` to match `projects_awarded` criteria; removed the old unfiltered "all DoD contracts" pull.
@@ -152,3 +226,4 @@ pipeline daily can never accidentally change a table's schema.
 - Simplified `piid_issuing_office` to 2 columns (dropped unused `command`/office-name text).
 - Trimmed PIID decode output to 3 columns (`service`, `type_code`, `type`); `issuing_office_code` is used internally but no longer exposed.
 - Renamed `new_opportunities` → `project_preaward`, `historical_projects` → `projects_awarded`.
+- Added the DD1391 MILCON ingestion + award-matching pipeline: `awards`, `dd1391_project_overview`, `dd1391_cost_rows`, `award_candidates`, `uic_crosswalk` tables; `awards_sync.py`, `dd1391_parser.py`, `award_matcher.py`, `claude_client.py`.
